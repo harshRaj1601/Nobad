@@ -52,6 +52,11 @@ Some live-tunnel behaviour still needs verification on more real PCs and network
 
 ## Configs
 
+* **Get free servers in 2 minutes** (empty Servers tab): direct Sign up / Open downloads buttons, and while there
+  are no servers NOBAD watches the Downloads folder (every 6 s, window visible only) and offers **Add now**.
+* **Free servers** guide: get your own free Proton VPN servers; while it is open NOBAD finds WireGuard files
+  downloaded in the last two weeks (top of the Downloads folder, read-only, links and files over 64 KB ignored) and
+  adds the ticked ones in one click. Servers you already have are skipped.
 * Import from files (several at once), drag and drop, QR image (file or pasted screenshot), pasted text, HTTPS URL, or the configs folder plus Rescan.
 * Live validation with line-numbered errors and warnings.
 * Editor with private/preshared keys hidden and preserved.
@@ -109,6 +114,8 @@ Some live-tunnel behaviour still needs verification on more real PCs and network
   server-country evidence, past service results, data freshness, restrictions). Server load is shown as not reported.
 * One-click connect through the existing engine, then verification of the exit country and platform reachability.
 * Freshness labels, stale-data fallback, a six-month cache limit (TMDB terms), required TMDB/JustWatch attribution.
+* Works without any setup: search and title pages come from Wikidata (which platforms carry the title, with direct
+  links) and Wikipedia (documented bans). A free TMDB key is an optional upgrade for country-by-country availability.
 * Your own TMDB key, checked before saving and stored DPAPI-encrypted outside `settings.json`; optional
   "services you have" filter.
 

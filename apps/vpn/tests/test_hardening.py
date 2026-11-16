@@ -209,16 +209,28 @@ def test_start_with_windows_refused_outside_program_files(monkeypatch):
     assert ok is False and "Program Files" in msg
 
 
-def test_links_open_through_explorer_never_as_admin(monkeypatch):
-    started = []
+def _capture_links(monkeypatch):
+    """open_url_as_user inline, elevated: returns the PowerShell scripts it would run."""
+    scripts = []
     monkeypatch.setattr(syscmd.os, "name", "nt")
-    monkeypatch.setattr(syscmd.subprocess, "Popen", lambda cmd, **k: started.append(cmd))
+    monkeypatch.setattr(syscmd, "OPEN_ASYNC", False)
+    monkeypatch.setattr(syscmd, "is_admin", lambda: True)
+    monkeypatch.setattr(syscmd.subprocess, "Popen", lambda cmd, **k: pytest.fail("fell back to explorer.exe"))
+    monkeypatch.setattr(syscmd, "run", lambda cmd, **k: scripts.append(cmd[-1]) or type("R", (), {"returncode": 0, "stderr": ""})())
+    return scripts
+
+
+def test_links_open_in_the_users_browser_never_as_admin(monkeypatch):
+    """explorer.exe <url> opened File Explorer on Windows 11; the link now runs as the signed-in user (limited)."""
+    scripts = _capture_links(monkeypatch)
     assert syscmd.open_url_as_user("https://portal.example/login?a=1&b=2") is True
-    assert started[-1][0].lower().endswith("explorer.exe") and started[-1][1] == "https://portal.example/login?a=1&b=2"
+    ps = scripts[-1]
+    assert "-RunLevel Limited" in ps and "-LogonType Interactive" in ps and "Unregister-ScheduledTask" in ps
+    assert "'url.dll,FileProtocolHandler '+'https://portal.example/login?a=1&b=2'" in ps
     for bad in ("javascript:alert(1)", "file:///C:/Windows/system32/cmd.exe", 'https://x" /c calc', "https://x\n",
                 "ms-settings:", "", None):
         assert syscmd.open_url_as_user(bad) is False, bad
-    assert len(started) == 1
+    assert len(scripts) == 1
 
 
 def test_tampered_journal_never_reaches_powershell(monkeypatch):
@@ -378,14 +390,12 @@ def test_one_shared_authenticode_check(monkeypatch):
     assert "-LiteralPath 'C:/it''s.msi'" in calls[-1][-1]          # a quote in the path can't break out
 
 
-def test_links_with_commas_reach_the_browser_not_documents(monkeypatch):
-    """explorer.exe splits its command line on ',' and ';' and then opens Documents instead of the link."""
-    started = []
-    monkeypatch.setattr(syscmd.os, "name", "nt")
-    monkeypatch.setattr(syscmd.subprocess, "Popen", lambda cmd, **k: started.append(cmd))
+def test_links_are_encoded_and_quotes_cant_break_the_script(monkeypatch):
+    scripts = _capture_links(monkeypatch)
     assert syscmd.open_url_as_user("https://en.wikipedia.org/wiki/List_of_banned_films#India,_2000s;x") is True
-    assert started[-1][1] == "https://en.wikipedia.org/wiki/List_of_banned_films#India%2C_2000s%3Bx"
-    assert syscmd.open_url_as_user("https://x.org/a b/é") is True and started[-1][1] == "https://x.org/a%20b/%C3%A9"
+    assert "https://en.wikipedia.org/wiki/List_of_banned_films#India%2C_2000s%3Bx'" in scripts[-1]
+    assert syscmd.open_url_as_user("https://x.org/a b/\u00e9") is True and "https://x.org/a%20b/%C3%A9'" in scripts[-1]
+    assert syscmd.open_url_as_user("https://x.org/it's") is True and "https://x.org/it''s'" in scripts[-1]
     for bad in ("https://user:pw@x.org/", "https://x.org/|calc", "https://x.org/\\..\\x"):
         assert syscmd.open_url_as_user(bad) is False, bad
 
@@ -468,3 +478,77 @@ def test_import_folder_is_read_only_for_nobad(monkeypatch):
     assert r["imported"] == ["Dropped1.conf"] and os.path.exists(good) and os.path.exists(link)
     assert configstore.import_inbox()["skipped"] == ["Dropped1.conf"]     # already imported: left alone
     assert not any(n.startswith("Linked1") for n in os.listdir(engine.config_dir()))
+
+
+PROTON = """[Interface]
+PrivateKey = {priv}
+Address = 10.2.0.2/32
+DNS = 10.2.0.1
+
+[Peer]
+# JP-FREE#27
+PublicKey = {pub}
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 212.102.51.115:51820
+"""
+
+
+def test_free_servers_found_in_downloads_and_imported_read_only(win, monkeypatch, tmp_path):
+    """Free servers: WireGuard files the user downloaded are offered and imported with the normal checks; the
+    Downloads folder is only read, links and old or oversized files are ignored."""
+    from conftest import PRIV, PUB
+    from nobadvpn import configstore, engine
+    engine.ensure_dirs()
+    dl = tmp_path / "Downloads"
+    dl.mkdir()
+    (dl / "wg-JP-FREE-27.conf").write_text(PROTON.format(priv=PRIV, pub=PUB), encoding="utf-8")
+    (dl / "notes.conf").write_text("not a wireguard file", encoding="utf-8")
+    (dl / "big.conf").write_text("[Interface]\n[Peer]\n" + "#" * 70000, encoding="utf-8")
+    (dl / "linked.conf").write_text(PROTON.format(priv=PRIV, pub=PUB).replace("212.102.51.115", "1.2.3.4"), encoding="utf-8")
+    old = dl / "old.conf"
+    old.write_text(PROTON.format(priv=PRIV, pub=PUB).replace("212.102.51.115", "5.6.7.8"), encoding="utf-8")
+    os.utime(old, (1, 1))
+    monkeypatch.setattr(configstore, "_downloads_dir", lambda: str(dl))
+    monkeypatch.setattr(syscmd, "_is_reparse", lambda p: str(p).endswith("linked.conf"))
+    found = configstore.downloads_scan()["files"]
+    assert [(f["file"], f["name"], f["country"]) for f in found] == [("wg-JP-FREE-27.conf", "JP-FREE-27", "Japan")]
+    r = configstore.downloads_import(["wg-JP-FREE-27.conf", "../secret.conf", "linked.conf"])
+    assert r["imported"] == ["JP-FREE-27"] and len(r["errors"]) == 2
+    assert sorted(os.listdir(dl)) == ["big.conf", "linked.conf", "notes.conf", "old.conf", "wg-JP-FREE-27.conf"]
+
+
+def test_import_folder_is_outside_the_recursively_locked_data_folder():
+    from nobadvpn import const
+    data = os.path.normcase(os.path.abspath(const.DATA_DIR))
+    inbox = os.path.normcase(os.path.abspath(const.INBOX_DIR))
+    assert not inbox.startswith(data + os.sep) and inbox != data
+
+
+def test_planted_settings_file_no_longer_skips_the_quarantine(monkeypatch, tmp_path):
+    d = tmp_path / "NobadVPN"
+    (d / "configs").mkdir(parents=True)
+    (d / "settings.json").write_text('{"auto_connect": true}')
+    (d / "configs" / "evil.conf").write_text("[Interface]")
+    monkeypatch.setattr(app, "DATA_DIR", str(d))
+    monkeypatch.setattr(app.os, "name", "nt")
+    monkeypatch.setattr(syscmd, "_is_reparse", lambda p: False)
+    monkeypatch.setattr(syscmd, "owned_by_admins", lambda p: not str(p).endswith("evil.conf"))   # one planted file
+    assert app.quarantine_untrusted_data_dir() and not d.exists()
+
+
+def test_environment_cannot_load_a_dotnet_profiler_into_admin_powershell(monkeypatch):
+    monkeypatch.setattr(syscmd.os, "name", "nt")
+    for k in ("COR_ENABLE_PROFILING", "COR_PROFILER_PATH", "COMPLUS_X", "CORECLR_PROFILER", "DOTNET_X",
+              "PSExecutionPolicyPreference"):
+        monkeypatch.setenv(k, "1")
+    syscmd.harden_environment()
+    assert not [k for k in os.environ if k.upper().startswith(("COR_", "COMPLUS_", "CORECLR_", "DOTNET_"))]
+    assert "PSExecutionPolicyPreference" not in os.environ
+
+
+def test_links_open_only_in_this_session_and_cant_expand_variables(monkeypatch):
+    scripts = _capture_links(monkeypatch)
+    assert syscmd.open_url_as_user("https://x.org/a?q=%USERNAME%&ok=%41") is True
+    ps = scripts[-1]
+    assert "SessionId=$sid" in ps and "ExecutablePath -ieq $exp" in ps
+    assert "q=%25USERNAME%25&ok=%41'" in ps

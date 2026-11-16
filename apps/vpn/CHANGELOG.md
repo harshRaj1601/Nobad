@@ -2,6 +2,70 @@
 
 All notable changes to NOBAD VPN. Versions follow [semantic versioning](https://semver.org/).
 
+## 1.6.0 · 2026-11-16
+
+### Added
+- **Get free servers in 2 minutes, right where you start.** With no servers yet, the Servers tab shows three steps
+  with direct buttons: *Sign up* (Proton VPN Free, e-mail only), *Open downloads* (WireGuard configs for Windows),
+  and done. While you have no servers, NOBAD checks your Downloads folder every few seconds (only while the window
+  is visible) and shows **Found free servers in Downloads** with **Add now**: no guide to keep open. The map and the
+  status panel point to it too.
+
+### Fixed
+- **Uninstalling stops every NOBAD process.** The app, its tray icon and the crash watchdog kept running after an
+  uninstall (and the watchdog could restart the app). The uninstaller now asks NOBAD to close, then stops every
+  copy at once, restores internet, removes the tunnels and scheduled tasks, deletes the program folder, and asks
+  whether to delete your settings, configs and logs too (default: keep them, they hold your keys).
+- **Upgrades** stop the running copy and restore internet before replacing files, so files in use never block an
+  update.
+
+## 1.5.1 · 2026-11-16
+
+### Security
+- **The import folder moved out of NOBAD's data folder** (now `ProgramData\NobadVPN-import`). The data folder is
+  locked recursively at every start; a user-writable folder inside it could have let a planted link steer that
+  administrator-level change at another folder. The import folder's own permissions are now set without touching
+  its contents.
+- **A prepared data folder is detected by who owns its files,** not by whether `settings.json` exists, so a planted
+  settings file can no longer skip the check. The installer locks the folder before writing settings.
+- **.NET profiler and PowerShell policy variables are removed** from the elevated app's environment, so they can't
+  load code into the PowerShell commands NOBAD runs.
+- **Links open only on your own desktop session,** never on another signed-in user's, and a lone `%` in a link is
+  encoded so it can't expand Windows variables.
+
+### Changed
+- Verifying a download now checks that it was built by NOBAD's release workflow from that version's tag (see the
+  VPN page and `docs/RELEASE-PROCESS.md`).
+
+## 1.5.0 · 2026-11-16
+
+### Added
+- **Free servers in two clicks.** Servers → Free servers walks you through getting your own free Proton VPN servers,
+  then finds the WireGuard files in your Downloads folder by itself while the guide is open. It shows each one's
+  country, name and server, ticks the new ones, and adds them in one click with the same checks as any import (no
+  script hooks). Servers you already have are marked and skipped. NOBAD only reads the Downloads folder.
+- NOBAD never ships shared servers: a bundled config would give every user the same private key and the same
+  one-connection account, so each user gets their own.
+
+## 1.4.1 · 2026-11-16
+
+### Fixed
+- **Links open in your browser, not File Explorer.** On current Windows 11, handing a link to `explorer.exe` from
+  the (administrator) app opened a File Explorer window. NOBAD now opens links as you, without admin rights, in your
+  default browser (a one-shot task that removes itself). Affects Where to watch, Report a problem and sign-in pages.
+
+### Added
+- **Where to watch works without setup.** Search and title pages come from Wikidata (no key, no account): which
+  platforms carry a title (Netflix, Disney+, Prime Video, Apple TV, Max, Hulu, Crunchyroll) with direct links, plus
+  the documented bans from Wikipedia. A free TMDB key stays available as an upgrade for country-by-country
+  availability and server matching.
+
+### Changed
+- **Lighter in the background.** Hidden in the tray or minimized, NOBAD samples traffic every 30 s instead of every
+  2 s (it used to start `wg.exe` every 2 s whenever the page was loaded), and the latency chart's pings stop.
+- **Side panel:** the speed test is a compact card (gauge beside the reading), Session shows one line while you're
+  disconnected instead of seven dashes, Settings rows use the full width, and every card has the same padding.
+
 ## 1.4.0 · 2026-11-16
 
 ### Added
